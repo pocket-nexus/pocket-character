@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "default_model_id": "packaged-model",
+  "models": [
+    {
+      "id": "packaged-model",
+      "model_name": "Packaged model",
+      "asset_path": "models/model.vrm"
+    }
+  ],
+  "animations": [
+    {
+      "id": "system-idle",
+      "animation_name": "idle",
+      "animation_description": "A calm resting motion for the character.",
+      "animation_trigger_scenario": "Used automatically while Persona is waiting and not speaking.",
+      "animation_type": "IDLE",
+      "asset_paths": [
+        "animations/idle.vrma"
+      ]
+    },
+    {
+      "id": "system-speaking",
+      "animation_name": "speaking",
+      "animation_description": "Natural conversational body movement while the character speaks.",
+      "animation_trigger_scenario": "Used automatically while supported voice output is active.",
+      "animation_type": "TALK",
+      "asset_paths": [
+        "animations/talk1.vrma",
+        "animations/talk2.vrma"
+      ]
+    },
+    {
+      "id": "packaged-greeting",
+      "animation_name": "greeting",
+      "animation_description": "A friendly greeting motion.",
+      "animation_trigger_scenario": "Use when beginning an interaction or welcoming the user.",
+      "animation_type": "GREETING",
+      "asset_paths": [
+        "animations/greeting.vrma"
+      ]
+    },
+    {
+      "id": "packaged-happy",
+      "animation_name": "happy",
+      "animation_description": "A warm, upbeat reaction.",
+      "animation_trigger_scenario": "Use for good news, success, gratitude, or a positive response.",
+      "animation_type": "HAPPY",
+      "asset_paths": [
+        "animations/happy.vrma"
+      ]
+    },
+    {
+      "id": "packaged-finger-gun",
+      "animation_name": "finger-gun",
+      "animation_description": "A playful finger-gun gesture.",
+      "animation_trigger_scenario": "Use for lighthearted confidence, a clever solution, or playful approval.",
+      "animation_type": "FINGER_GUN",
+      "asset_paths": [
+        "animations/finger-gun.vrma"
+      ]
+    },
+    {
+      "id": "packaged-dance",
+      "animation_name": "dance",
+      "animation_description": "A celebratory dance.",
+      "animation_trigger_scenario": "Use for a major success, an exciting milestone, or an explicit request to dance.",
+      "animation_type": "DANCE",
+      "asset_paths": [
+        "animations/dance.vrma"
+      ]
+    }
+  ]
+}

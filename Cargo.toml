@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/pocket-character", "crates/pocket-character-core"]
+members = [
+  "crates/pocket-character",
+  "crates/pocket-character-core",
+  "crates/pocket-persona",
+]
 # The vendored engine keeps its own workspaces (Cargo would otherwise try to
 # adopt the path-dependency crates into this one and break their inheritance).
 exclude = ["vendor"]
@@ -14,11 +18,12 @@ repository = "https://github.com/pocket-stack/pocket-character"
 [workspace.dependencies]
 # The engine family is vendored as a git submodule (vendor/pocketjs) so the
 # Rust crates and the JS framework/build pipeline stay pinned to ONE commit.
-pocket3d = { path = "vendor/pocketjs/pocket3d/crates/pocket3d" }
-pocket-vrm = { path = "vendor/pocketjs/pocket3d/crates/pocket-vrm" }
-pocket-mod = { path = "vendor/pocketjs/pocket3d/crates/pocket-mod" }
-pocket-ui-wgpu = { path = "vendor/pocketjs/pocket3d/crates/pocket-ui-wgpu" }
-pocketjs-core = { path = "vendor/pocketjs/core", features = ["std"] }
+pocket3d = { path = "vendor/pocketjs/engine/pocket3d/crates/pocket3d" }
+pocket-vrm = { path = "vendor/pocketjs/engine/crates/pocket-vrm" }
+pocket-mod = { path = "vendor/pocketjs/engine/crates/pocket-mod" }
+pocket-ui-wgpu = { path = "vendor/pocketjs/engine/crates/pocket-ui-wgpu" }
+pocket-widget = { path = "vendor/pocketjs/engine/crates/pocket-widget" }
+pocketjs-core = { path = "vendor/pocketjs/engine/core", features = ["std"] }
 pocket-character-core = { path = "crates/pocket-character-core" }
 
 wgpu = "25"
@@ -27,6 +32,8 @@ glam = "0.33"
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.dev]
 opt-level = 1

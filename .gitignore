@@ -1,6 +1,7 @@
 target/
 node_modules/
 dist/
+# Tool-owned reference checkouts, benchmark reports, and temporary receipts.
 out/
 assets/*.vrm
 assets/*.vrma
