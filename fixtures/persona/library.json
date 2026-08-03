@@ -16,7 +16,7 @@
       "animation_trigger_scenario": "Used automatically while Persona is waiting and not speaking.",
       "animation_type": "IDLE",
       "asset_paths": [
-        "animations/idle.vrma"
+        "animations/pocket-controlled-idle.vrma"
       ]
     },
     {
@@ -26,8 +26,8 @@
       "animation_trigger_scenario": "Used automatically while supported voice output is active.",
       "animation_type": "TALK",
       "asset_paths": [
-        "animations/talk1.vrma",
-        "animations/talk2.vrma"
+        "animations/pocket-controlled-talk1.vrma",
+        "animations/pocket-controlled-talk2.vrma"
       ]
     },
     {
@@ -37,7 +37,7 @@
       "animation_trigger_scenario": "Use when beginning an interaction or welcoming the user.",
       "animation_type": "GREETING",
       "asset_paths": [
-        "animations/greeting.vrma"
+        "animations/pocket-controlled-greeting.vrma"
       ]
     },
     {
@@ -47,7 +47,7 @@
       "animation_trigger_scenario": "Use for good news, success, gratitude, or a positive response.",
       "animation_type": "HAPPY",
       "asset_paths": [
-        "animations/happy.vrma"
+        "animations/pocket-controlled-happy.vrma"
       ]
     },
     {
@@ -57,7 +57,7 @@
       "animation_trigger_scenario": "Use for lighthearted confidence, a clever solution, or playful approval.",
       "animation_type": "FINGER_GUN",
       "asset_paths": [
-        "animations/finger-gun.vrma"
+        "animations/pocket-controlled-finger-gun.vrma"
       ]
     },
     {
@@ -67,7 +67,7 @@
       "animation_trigger_scenario": "Use for a major success, an exciting milestone, or an explicit request to dance.",
       "animation_type": "DANCE",
       "asset_paths": [
-        "animations/dance.vrma"
+        "animations/pocket-controlled-dance.vrma"
       ]
     }
   ]

@@ -24,16 +24,22 @@ bun run accept:persona
 bun run accept:pocket
 ```
 
-Press Ctrl-C to terminate the complete target process tree. For the sequential
-resource comparison:
+Visual acceptance includes the whole pose, not only a running window: compare
+the shoulders, wrists/hands, hips, knees, and ankles/feet through idle and
+speaking, and reject any persistent rest-axis twist. Press Ctrl-C to terminate
+the complete target process tree. For the sequential resource comparison:
 
 ```sh
 bun run bench:persona
+bun run bench:persona:speaking
 bun run bench:persona:controlled
 ```
 
-See [docs/PERSONA.md](docs/PERSONA.md) for the parity boundary, benchmark
-methodology, measurements, and asset-license constraints.
+The production commands compare stock Persona at its display-driven rate with
+Pocket at its intended 30 fps / 2048 texture cap, in idle or sustained-speaking
+state. See [docs/PERSONA.md](docs/PERSONA.md) for the latest upstream pin,
+parity boundary, benchmark methodology, measurements, and asset-license
+constraints.
 
 ## What it does
 

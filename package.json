@@ -10,6 +10,7 @@
     "accept:persona": "bun scripts/accept-persona.ts reference",
     "accept:pocket": "bun scripts/accept-persona.ts pocket",
     "bench:persona": "bun scripts/accept-persona.ts bench --profile production",
+    "bench:persona:speaking": "bun scripts/accept-persona.ts bench --profile production --activity speaking",
     "bench:persona:controlled": "bun scripts/accept-persona.ts bench --profile controlled"
   }
 }

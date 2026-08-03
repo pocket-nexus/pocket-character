@@ -4,6 +4,7 @@ import {
   parseCpuTimeSeconds,
   parseReferenceCanvasReceipt,
   parseReferenceFrameSample,
+  validateBenchmarkActivityHealth,
   validatePocketHealthBody,
 } from "../scripts/bench-persona";
 
@@ -16,6 +17,7 @@ describe("Persona benchmark receipts", () => {
           modelConfigured: true,
           windowVisible: true,
           renderFps: 59.8,
+          renderFrameCount: 123,
         },
       }),
     ).toBe(59.8);
@@ -24,8 +26,61 @@ describe("Persona benchmark receipts", () => {
         modelConfigured: true,
         windowVisible: true,
         renderFps: 59.8,
+        renderFrameCount: 123,
       }),
     ).toThrow("status must be an object");
+    expect(() =>
+      validatePocketHealthBody({
+        status: {
+          modelConfigured: true,
+          windowVisible: true,
+          renderFps: 59.8,
+        },
+      }),
+    ).toThrow("renderFrameCount must be a positive integer");
+  });
+
+  test("requires the requested activity to reach both targets", () => {
+    const speakingState = {
+      phase: "active",
+      activity: "speaking",
+      microphoneMuted: false,
+      outputMuted: false,
+    };
+    expect(() =>
+      validateBenchmarkActivityHealth(
+        "reference",
+        { ok: true, lastState: speakingState },
+        "speaking",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateBenchmarkActivityHealth(
+        "pocket",
+        {
+          ok: true,
+          status: {
+            voiceState: speakingState,
+            activeAnimation: "speaking",
+            audioLevel: 0.349999994,
+          },
+        },
+        "speaking",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateBenchmarkActivityHealth(
+        "pocket",
+        {
+          status: {
+            voiceState: speakingState,
+            activeAnimation: "idle",
+            audioLevel: 0,
+          },
+        },
+        "speaking",
+      ),
+    ).toThrow("activeAnimation must be speaking");
   });
 
   test("requires the reference viewport, backing size, and WebGL context", () => {

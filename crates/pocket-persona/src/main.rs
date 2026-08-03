@@ -29,6 +29,7 @@ struct Args {
     size: (u32, u32),
     max_texture_dim: u32,
     headless_shot: Option<PathBuf>,
+    headless_speaking: bool,
     ticks: u32,
 }
 
@@ -48,7 +49,14 @@ fn main() -> Result<()> {
         max_texture_dim: args.max_texture_dim,
     });
     if let Some(output) = args.headless_shot {
-        return headless_shot(widget, args.size, args.fps, args.ticks, &output);
+        return headless_shot(
+            widget,
+            args.size,
+            args.fps,
+            args.ticks,
+            args.headless_speaking,
+            &output,
+        );
     }
     pocket_widget::run(
         WidgetConfig {
@@ -71,10 +79,11 @@ fn parse_args(values: Vec<String>) -> Result<Args> {
     let mut library = None;
     let mut bundle = default_repo_root().join("dist/pocket-persona/guest.js");
     let mut bridge_port = Some(47_831);
-    let mut fps = 60.0;
+    let mut fps = 30.0;
     let mut size = DEFAULT_SIZE;
     let mut max_texture_dim = 2048;
     let mut headless_shot = None;
+    let mut headless_speaking = false;
     let mut ticks = 90;
     let mut index = 0;
     while index < values.len() {
@@ -95,6 +104,7 @@ fn parse_args(values: Vec<String>) -> Result<Args> {
             "--size" => size = parse_size(next(&mut index)?)?,
             "--max-texture-dim" => max_texture_dim = next(&mut index)?.parse()?,
             "--headless-shot" => headless_shot = Some(PathBuf::from(next(&mut index)?)),
+            "--headless-speaking" => headless_speaking = true,
             "--ticks" => ticks = next(&mut index)?.parse()?,
             "--help" | "-h" => {
                 println!(
@@ -106,10 +116,11 @@ fn parse_args(values: Vec<String>) -> Result<Args> {
                      \t--bundle <guest.js>          Pocket policy bundle\n\
                      \t--bridge-port <port>         Persona HTTP/MCP port (default 47831; 0 = any)\n\
                      \t--no-bridge                  Disable HTTP/MCP\n\
-                     \t--fps <hz>                   Fixed update/render cap (default 60)\n\
+                     \t--fps <hz>                   Fixed update/render cap (default 30)\n\
                      \t--size <width>x<height>      Logical window size (default 430x680)\n\
                      \t--max-texture-dim <pixels>   Texture cap (default 2048)\n\
                      \t--headless-shot <png>        Render one offscreen verification frame\n\
+                     \t--headless-speaking          Start the offscreen receipt in speaking state\n\
                      \t--ticks <count>              Headless fixed steps (default 90)"
                 );
                 std::process::exit(0);
@@ -124,6 +135,9 @@ fn parse_args(values: Vec<String>) -> Result<Args> {
     if !(256..=4096).contains(&max_texture_dim) {
         bail!("--max-texture-dim must be between 256 and 4096");
     }
+    if headless_speaking && headless_shot.is_none() {
+        bail!("--headless-speaking requires --headless-shot");
+    }
     let library = library.context("--library is required")?;
     Ok(Args {
         library,
@@ -133,6 +147,7 @@ fn parse_args(values: Vec<String>) -> Result<Args> {
         size,
         max_texture_dim,
         headless_shot,
+        headless_speaking,
         ticks,
     })
 }
@@ -157,11 +172,15 @@ fn headless_shot(
     size: (u32, u32),
     fps: f32,
     ticks: u32,
+    speaking: bool,
     output: &Path,
 ) -> Result<()> {
     let gpu = Gpu::new_headless()?;
     let mut renderer = Renderer::new(&gpu, pocket3d::gpu::OFFSCREEN_FORMAT)?;
     widget.init(&gpu, &mut renderer)?;
+    if speaking {
+        widget.set_headless_speaking();
+    }
     let input = Input::default();
     for _ in 0..ticks {
         widget.tick(1.0 / fps, &input, size)?;
@@ -184,5 +203,11 @@ mod tests {
         assert_eq!(parse_size("430x680").unwrap(), (430, 680));
         assert!(parse_size("430").is_err());
         assert!(parse_size("20x20").is_err());
+    }
+
+    #[test]
+    fn defaults_to_thirty_fps() {
+        let args = parse_args(vec!["--library".into(), "library.json".into()]).unwrap();
+        assert_eq!(args.fps, 30.0);
     }
 }

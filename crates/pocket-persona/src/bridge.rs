@@ -79,6 +79,8 @@ pub struct StatusSnapshot {
     pub active_animation: String,
     #[serde(rename = "renderFps")]
     pub render_fps: f32,
+    #[serde(rename = "renderFrameCount")]
+    pub render_frame_count: u64,
     #[serde(rename = "frameTimeP95Ms")]
     pub frame_time_p95_ms: f32,
     #[serde(rename = "frameTimeP99Ms")]
@@ -96,6 +98,7 @@ impl StatusSnapshot {
             audio_level: 0.0,
             active_animation: "idle".into(),
             render_fps: 0.0,
+            render_frame_count: 0,
             frame_time_p95_ms: 0.0,
             frame_time_p99_ms: 0.0,
             frame_time_max_ms: 0.0,
@@ -134,7 +137,7 @@ impl Bridge {
                             }
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(Duration::from_millis(10));
+                            std::thread::sleep(Duration::from_millis(50));
                         }
                         Err(error) => {
                             log::warn!("Pocket Persona bridge accept: {error}");
@@ -209,6 +212,10 @@ fn handle_connection(
     status: &Arc<Mutex<StatusSnapshot>>,
     sender: &mpsc::SyncSender<BridgeCommand>,
 ) -> Result<()> {
+    // Accepted sockets can inherit O_NONBLOCK from the listener on macOS.
+    // The request parser expects a bounded blocking read, so clear it before
+    // installing timeouts instead of surfacing a transient EAGAIN as HTTP 502.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let request = read_request(&mut stream)?;

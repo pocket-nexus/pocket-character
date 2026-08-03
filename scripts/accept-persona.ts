@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { platform, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -29,11 +29,14 @@ import {
 
 type Mode = "reference" | "pocket" | "bench";
 type BenchmarkProfile = "production" | "controlled";
+type BenchmarkActivity = "idle" | "speaking";
+type ReferenceCatalogMode = "packaged" | "controlled";
 type SpawnedProcess = ReturnType<typeof Bun.spawn>;
 
 interface CliOptions {
   mode: Mode;
   profile: BenchmarkProfile;
+  activity: BenchmarkActivity;
   cycles: number;
   realAudio: boolean;
   settleSeconds: number;
@@ -55,7 +58,7 @@ const OUT = join(ROOT, "out");
 const REFERENCE_ROOT = join(OUT, "persona-reference");
 const REFERENCE_STATE = join(OUT, "persona-reference-state");
 const REFERENCE_REPOSITORY = "https://github.com/xikhar/persona.git";
-const REFERENCE_COMMIT = "4efec3ac729944d0b36137dd8847cc1b488e0bcb";
+const REFERENCE_COMMIT = "bb7ef2455b23aee685f68c9e83a185347d257964";
 const FIXTURE_LIBRARY = join(ROOT, "fixtures", "persona", "library.json");
 const REFERENCE_LIBRARY = join(
   REFERENCE_ROOT,
@@ -85,6 +88,26 @@ const POCKET_GUEST_DIR = join(ROOT, "dist", "pocket-persona");
 const POCKET_GUEST = join(POCKET_GUEST_DIR, "guest.js");
 const READINESS_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 2_000;
+const LEGACY_CONTROLLED_LIBRARY_SHA256 =
+  "4c344b94c35316ac928784a42171ed94db55667e9f52a95db713a7f223401991";
+const CONTROLLED_ANIMATION_NAMES = [
+  "pocket-controlled-idle",
+  "pocket-controlled-talk1",
+  "pocket-controlled-talk2",
+  "pocket-controlled-greeting",
+  "pocket-controlled-happy",
+  "pocket-controlled-finger-gun",
+  "pocket-controlled-dance",
+] as const;
+const LEGACY_CONTROLLED_ANIMATION_NAMES = [
+  "idle",
+  "talk1",
+  "talk2",
+  "greeting",
+  "happy",
+  "finger-gun",
+  "dance",
+] as const;
 
 const ASSETS: Asset[] = [
   {
@@ -136,12 +159,18 @@ async function main(argv: string[]): Promise<number> {
 
   try {
     await preflight(options);
-    await ensureAssets();
     await ensureReferenceCheckout();
-    stageReferenceLibrary();
+    const referenceCatalogMode: ReferenceCatalogMode =
+      options.mode === "bench" ? "packaged" : "controlled";
+    if (referenceCatalogMode === "packaged") {
+      await restoreToolOwnedReferenceOverlay();
+    } else {
+      await ensureAssets();
+      stageControlledReferenceLibrary();
+    }
 
     if (options.mode === "reference") {
-      await ensureReferenceBuild(options.realAudio);
+      await ensureReferenceBuild(options.realAudio, referenceCatalogMode);
       await runVisibleReference(options);
       return 0;
     }
@@ -152,7 +181,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
 
-    await ensureReferenceBuild(false);
+    await ensureReferenceBuild(false, referenceCatalogMode);
     return runBenchmark(options);
   } catch (error) {
     if (signalExitCode != null) return signalExitCode;
@@ -179,6 +208,7 @@ function parseArgs(argv: string[]): CliOptions {
   }
 
   let profile: BenchmarkProfile = "production";
+  let activity: BenchmarkActivity = "idle";
   let cycles = 0;
   let realAudio = false;
   let settleSeconds = 30;
@@ -222,6 +252,14 @@ function parseArgs(argv: string[]): CliOptions {
         profile = value;
         break;
       }
+      case "--activity": {
+        const value = readValue(flag);
+        if (value !== "idle" && value !== "speaking") {
+          throw new Error("--activity must be idle or speaking");
+        }
+        activity = value;
+        break;
+      }
       case "--cycles":
         cycles = readNumber(flag, 0, true);
         break;
@@ -248,6 +286,9 @@ function parseArgs(argv: string[]): CliOptions {
   if (mode !== "bench" && profile !== "production") {
     throw new Error("--profile is only valid in bench mode");
   }
+  if (mode !== "bench" && activity !== "idle") {
+    throw new Error("--activity is only valid in bench mode");
+  }
   if (mode === "bench" && realAudio) {
     throw new Error("--real-audio is only valid for accept:persona");
   }
@@ -255,6 +296,7 @@ function parseArgs(argv: string[]): CliOptions {
   return {
     mode,
     profile,
+    activity,
     cycles,
     realAudio,
     settleSeconds,
@@ -381,18 +423,7 @@ async function ensureReferenceCheckout(): Promise<void> {
     "reference",
   );
   if (head.trim() !== REFERENCE_COMMIT) {
-    const status = (
-      await commandOutput(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
-        REFERENCE_ROOT,
-        "reference",
-      )
-    ).trim();
-    if (status.length > 0) {
-      throw new Error(
-        `Persona reference has tracked edits and cannot switch commits: ${status}`,
-      );
-    }
+    await restoreToolOwnedReferenceOverlay();
     await runCommand(
       ["git", "fetch", "--depth=1", "origin", REFERENCE_COMMIT],
       REFERENCE_ROOT,
@@ -417,7 +448,72 @@ async function ensureReferenceCheckout(): Promise<void> {
   }
 }
 
-function stageReferenceLibrary(): void {
+async function restoreToolOwnedReferenceOverlay(): Promise<void> {
+  const status = (
+    await commandOutput(
+      ["git", "status", "--porcelain", "--untracked-files=no"],
+      REFERENCE_ROOT,
+      "reference",
+    )
+  ).trim();
+  if (status.length > 0 && !isToolOwnedReferenceOverlay(status)) {
+    throw new Error(
+      `Persona reference has tracked edits outside the controlled overlay: ${status}`,
+    );
+  }
+  if (status.length > 0) {
+    await runCommand(
+      [
+        "git",
+        "restore",
+        "--source=HEAD",
+        "--staged",
+        "--worktree",
+        "--",
+        "public/assets/library.json",
+      ],
+      REFERENCE_ROOT,
+      "reference",
+    );
+  }
+  removeToolOwnedReferenceSymlinks();
+}
+
+function isToolOwnedReferenceOverlay(status: string): boolean {
+  const librarySha256 = existsSync(REFERENCE_LIBRARY)
+    ? sha256File(REFERENCE_LIBRARY)
+    : null;
+  return (
+    (librarySha256 === sha256File(FIXTURE_LIBRARY) ||
+      librarySha256 === LEGACY_CONTROLLED_LIBRARY_SHA256) &&
+    status
+      .split("\n")
+      .every((line) => line.endsWith(" public/assets/library.json"))
+  );
+}
+
+function removeToolOwnedReferenceSymlinks(): void {
+  const controlledPaths = [
+    [join(REFERENCE_ROOT, "public", "assets", "models", "model.vrm"), ASSETS[0].path],
+    ...[
+      ...CONTROLLED_ANIMATION_NAMES,
+      ...LEGACY_CONTROLLED_ANIMATION_NAMES,
+    ].map((name) => [
+      join(REFERENCE_ROOT, "public", "assets", "animations", `${name}.vrma`),
+      ASSETS[1].path,
+    ]),
+  ];
+  for (const [path, expectedSource] of controlledPaths) {
+    if (
+      isDanglingSymlink(path) &&
+      resolve(dirname(path), readlinkSync(path)) === expectedSource
+    ) {
+      unlinkSync(path);
+    }
+  }
+}
+
+function stageControlledReferenceLibrary(): void {
   const assetsRoot = join(REFERENCE_ROOT, "public", "assets");
   const modelRoot = join(assetsRoot, "models");
   const animationRoot = join(assetsRoot, "animations");
@@ -425,15 +521,7 @@ function stageReferenceLibrary(): void {
   mkdirSync(animationRoot, { recursive: true });
 
   ensureSymlink(ASSETS[0].path, join(modelRoot, "model.vrm"));
-  for (const name of [
-    "idle",
-    "talk1",
-    "talk2",
-    "greeting",
-    "happy",
-    "finger-gun",
-    "dance",
-  ]) {
+  for (const name of CONTROLLED_ANIMATION_NAMES) {
     ensureSymlink(ASSETS[1].path, join(animationRoot, `${name}.vrma`));
   }
 
@@ -471,7 +559,10 @@ function isDanglingSymlink(path: string): boolean {
   }
 }
 
-async function ensureReferenceBuild(realAudio: boolean): Promise<void> {
+async function ensureReferenceBuild(
+  realAudio: boolean,
+  catalogMode: ReferenceCatalogMode,
+): Promise<void> {
   const packageLock = join(REFERENCE_ROOT, "package-lock.json");
   const installFingerprint = sha256File(packageLock);
   const installMarker = join(REFERENCE_STATE, "install.sha256");
@@ -488,25 +579,26 @@ async function ensureReferenceBuild(realAudio: boolean): Promise<void> {
     [
       REFERENCE_COMMIT,
       installFingerprint,
-      sha256File(FIXTURE_LIBRARY),
-      ...ASSETS.map((asset) => asset.sha256),
+      catalogMode,
+      ...(catalogMode === "controlled"
+        ? [sha256File(FIXTURE_LIBRARY), ...ASSETS.map((asset) => asset.sha256)]
+        : [sha256File(REFERENCE_LIBRARY)]),
     ].join("\n"),
   );
   const buildMarker = join(REFERENCE_STATE, "renderer.sha256");
-  const builtModel = join(
-    REFERENCE_ROOT,
-    "dist",
-    "assets",
-    "models",
-    "model.vrm",
-  );
+  const catalogAssets = referenceCatalogAssetPaths();
   if (
     readText(buildMarker).trim() !== buildFingerprint ||
     !existsSync(join(REFERENCE_ROOT, "dist", "index.html")) ||
-    !existsSync(builtModel)
+    !referenceBuildAssetsMatch(catalogAssets)
   ) {
     console.log("build   Persona renderer");
     await runCommand(["npm", "run", "build"], REFERENCE_ROOT, "reference");
+    if (!referenceBuildAssetsMatch(catalogAssets)) {
+      throw new Error(
+        "Persona build did not preserve every model/animation asset declared by library.json",
+      );
+    }
     writeText(buildMarker, `${buildFingerprint}\n`);
   }
 
@@ -518,6 +610,55 @@ async function ensureReferenceBuild(realAudio: boolean): Promise<void> {
       "reference",
     );
   }
+}
+
+function referenceCatalogAssetPaths(): string[] {
+  const parsed = JSON.parse(readFileSync(REFERENCE_LIBRARY, "utf8")) as {
+    models?: Array<{ asset_path?: unknown }>;
+    animations?: Array<{ asset_paths?: unknown }>;
+  };
+  const rawPaths: unknown[] = [
+    ...(parsed.models ?? []).map((model) => model.asset_path),
+    ...(parsed.animations ?? []).flatMap((animation) =>
+      Array.isArray(animation.asset_paths) ? animation.asset_paths : [],
+    ),
+  ];
+  if (rawPaths.length === 0) {
+    throw new Error("Persona library.json declares no model or animation assets");
+  }
+  const publicAssets = join(REFERENCE_ROOT, "public", "assets");
+  return [...new Set(rawPaths.map((rawPath) => {
+    if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
+      throw new Error("Persona library.json contains an invalid asset path");
+    }
+    const normalized = rawPath.replaceAll("\\", "/");
+    const source = resolve(publicAssets, normalized);
+    const withinRoot = relative(publicAssets, source);
+    if (
+      isAbsolute(normalized) ||
+      withinRoot === ".." ||
+      withinRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+    ) {
+      throw new Error(`Persona library asset escapes public/assets: ${rawPath}`);
+    }
+    return normalized;
+  }))];
+}
+
+function referenceBuildAssetsMatch(assetPaths: readonly string[]): boolean {
+  const publicAssets = join(REFERENCE_ROOT, "public", "assets");
+  const builtAssets = join(REFERENCE_ROOT, "dist", "assets");
+  return assetPaths.every((assetPath) => {
+    const source = join(publicAssets, assetPath);
+    const built = join(builtAssets, assetPath);
+    return (
+      existsSync(source) &&
+      existsSync(built) &&
+      statSync(source).isFile() &&
+      statSync(built).isFile() &&
+      sha256File(source) === sha256File(built)
+    );
+  });
 }
 
 async function ensurePocketBuild(): Promise<void> {
@@ -597,7 +738,7 @@ async function runVisiblePocket(options: CliOptions): Promise<void> {
       "--bridge-port",
       String(port),
       "--fps",
-      "60",
+      "30",
       "--max-texture-dim",
       "2048",
     ],
@@ -689,6 +830,9 @@ function printVisualChecklist(
   console.log(`ready   ${target} at http://127.0.0.1:${port}`);
   console.log("check   full character in a transparent, frameless, topmost 430x680 window");
   console.log("check   idle loop, autonomous blink, and spring motion");
+  console.log(
+    "check   natural shoulder/wrist/hand and hip/knee/ankle/foot axes; no twist",
+  );
   console.log("check   speaking body + pulsed lips, then action crossfade and return");
   console.log("input   scroll zoom · left-drag orbit · right-drag pan");
   console.log(
@@ -802,17 +946,17 @@ async function runBenchmark(options: CliOptions): Promise<number> {
   const profile =
     options.profile === "controlled"
       ? { fps: 120, texture: 4096 }
-      : { fps: 60, texture: 2048 };
+      : { fps: 30, texture: 2048 };
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outPath =
     options.outPath ??
     join(
       OUT,
       "bench",
-      `persona-${options.profile}-${profile.fps}hz-${profile.texture}-${stamp}.json`,
+      `persona-${options.profile}-${options.activity}-${profile.fps}hz-${profile.texture}-${stamp}.json`,
     );
   console.log(
-    `bench   ${options.profile}: ${profile.fps} Hz / ${profile.texture}px textures`,
+    `bench   ${options.profile}/${options.activity}: Pocket ${profile.fps} Hz / ${profile.texture}px textures`,
   );
   console.log("bench   keep each topmost window visible and leave input untouched");
 
@@ -833,6 +977,8 @@ async function runBenchmark(options: CliOptions): Promise<number> {
       String(profile.fps),
       "--max-texture-dim",
       String(profile.texture),
+      "--activity",
+      options.activity,
       "--settle",
       String(options.settleSeconds),
       "--samples",
@@ -1002,11 +1148,12 @@ function usage(): string {
 Usage:
   bun run accept:persona [-- --cycles N] [--real-audio]
   bun run accept:pocket [-- --cycles N]
-  bun run bench:persona [-- --settle 30 --samples 9 --interval 5]
-  bun run bench:persona:controlled [-- --settle 30 --samples 9 --interval 5]
+  bun run bench:persona [-- --activity idle|speaking --settle 30 --samples 9 --interval 5]
+  bun run bench:persona:controlled [-- --activity idle|speaking --settle 30 --samples 9 --interval 5]
 
-The two visual commands stage the same pinned Persona catalog and repeat the
-same idle, speaking/lip-sync, listening, and greeting sequence. N=0 (default)
-repeats until Ctrl-C. Benchmark modes run Persona and Pocket sequentially and
-write a timestamped JSON report under out/bench/.`;
+The two visual commands stage the same controlled fixture catalog and repeat
+the same idle, speaking/lip-sync, listening, and greeting sequence. N=0
+(default) repeats until Ctrl-C. Benchmark modes restore Persona's packaged
+catalog, run Persona and Pocket sequentially, and write a timestamped JSON
+report under out/bench/.`;
 }

@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 
 export type TargetName = "reference" | "pocket";
 type RunStatus = "running" | "ok" | "failed";
+type BenchmarkActivity = "idle" | "speaking";
 
 interface Options {
   referenceBin: string;
@@ -38,6 +39,7 @@ interface Options {
   bundle: string;
   maxFps: number | null;
   maxTextureDim: number | null;
+  activity: BenchmarkActivity;
   settleSeconds: number;
   sampleCount: number;
   intervalSeconds: number;
@@ -187,6 +189,7 @@ interface RunResult {
   launched_at: string;
   ready_at: string | null;
   readiness_health: HealthCapture | null;
+  settled_activity_health: HealthCapture | null;
   reference_cdp: ReferenceCdpReceipt | null;
   frame_receipt: ReferenceFrameReceipt | null;
   settled_at: string | null;
@@ -199,7 +202,7 @@ interface RunResult {
 }
 
 interface Report {
-  schema_version: 4;
+  schema_version: 5;
   benchmark: "persona-reference-vs-pocket";
   status: "running" | "ok" | "failed" | "interrupted";
   started_at: string;
@@ -211,6 +214,7 @@ interface Report {
     interval_seconds: number;
     max_fps: number | null;
     max_texture_dim: number | null;
+    activity: BenchmarkActivity;
     readiness_timeout_seconds: number;
     cdp_timeout_seconds: number;
     output: string;
@@ -250,6 +254,7 @@ const READINESS_TIMEOUT_SECONDS = 30;
 const CDP_TIMEOUT_SECONDS = 30;
 const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_REQUEST_TIMEOUT_MS = 1_000;
+const EVENT_REQUEST_TIMEOUT_MS = 2_000;
 const CDP_POLL_INTERVAL_MS = 250;
 const CDP_COMMAND_TIMEOUT_MS = 10_000;
 const REFERENCE_VIEWPORT = {
@@ -293,7 +298,7 @@ async function main(argv: string[]): Promise<number> {
   const startedAt = new Date();
   const startedClock = performance.now();
   const report: Report = {
-    schema_version: 4,
+    schema_version: 5,
     benchmark: "persona-reference-vs-pocket",
     status: "running",
     started_at: startedAt.toISOString(),
@@ -305,6 +310,7 @@ async function main(argv: string[]): Promise<number> {
       interval_seconds: options.intervalSeconds,
       max_fps: options.maxFps,
       max_texture_dim: options.maxTextureDim,
+      activity: options.activity,
       readiness_timeout_seconds: READINESS_TIMEOUT_SECONDS,
       cdp_timeout_seconds: CDP_TIMEOUT_SECONDS,
       output: options.outPath,
@@ -321,11 +327,11 @@ async function main(argv: string[]): Promise<number> {
       readiness_policy:
         "each target must return HTTP 200 JSON with ok:true from its isolated loopback /health endpoint before settling",
       sample_health_policy:
-        "every resource sample includes a contemporaneous successful /health response",
+        "settle completion and every sample require the requested voice state on both targets; Pocket also requires the matching active animation and amplitude",
       reference_frame_policy:
         "Electron must expose a non-settings CDP page with a ready 430x680 DPR 1.5 WebGL canvas backed by 645x1020 pixels; one lightweight rAF promise spans the resource sampling window",
       pocket_frame_policy:
-        "every Pocket health receipt must report modelConfigured=true, windowVisible=true, and renderFps>1",
+        "every Pocket health receipt must report modelConfigured=true, windowVisible=true, renderFps>1, and a positive renderFrameCount that advances between samples",
       exited_process_caveat:
         "CPU accrued after the previous snapshot by a process that exits before the next snapshot is not observable",
     },
@@ -557,6 +563,7 @@ async function captureRequiredHealth(
   spec: LaunchSpec,
   child: SpawnedProcess,
   context: string,
+  activity?: BenchmarkActivity,
 ): Promise<HealthCapture> {
   const result = await probeHealth(
     spec,
@@ -568,7 +575,7 @@ async function captureRequiredHealth(
       `${spec.target} ${context} health check failed: ${result.failure}`,
     );
   }
-  const validationFailure = healthValidationFailure(spec, result.capture);
+  const validationFailure = healthValidationFailure(spec, result.capture, activity);
   if (validationFailure != null) {
     throw new Error(
       `${spec.target} ${context} health check failed: ${validationFailure}`,
@@ -580,13 +587,67 @@ async function captureRequiredHealth(
 function healthValidationFailure(
   spec: LaunchSpec,
   capture: HealthCapture,
+  activity?: BenchmarkActivity,
 ): string | null {
-  if (spec.target !== "pocket") return null;
   try {
-    validatePocketHealthBody(capture.body);
+    if (spec.target === "pocket") validatePocketHealthBody(capture.body);
+    if (activity != null) {
+      validateBenchmarkActivityHealth(spec.target, capture.body, activity);
+    }
     return null;
   } catch (error) {
     return errorMessage(error);
+  }
+}
+
+export function validateBenchmarkActivityHealth(
+  target: TargetName,
+  body: JsonObject,
+  activity: BenchmarkActivity,
+): void {
+  const expectedState = {
+    phase: activity === "speaking" ? "active" : "inactive",
+    activity,
+    microphoneMuted: false,
+    outputMuted: false,
+  };
+  const state =
+    target === "reference"
+      ? body.lastState
+      : isJsonObject(body.status)
+        ? body.status.voiceState
+        : null;
+  if (!isJsonObject(state)) {
+    throw new Error(`${target} activity voice state must be an object`);
+  }
+  for (const [name, expected] of Object.entries(expectedState)) {
+    if (state[name] !== expected) {
+      throw new Error(
+        `${target} activity ${name} must be ${JSON.stringify(expected)}; ` +
+          `found ${JSON.stringify(state[name])}`,
+      );
+    }
+  }
+
+  if (target === "pocket") {
+    const status = body.status as JsonObject;
+    if (status.activeAnimation !== activity) {
+      throw new Error(
+        `Pocket activeAnimation must be ${activity}; ` +
+          `found ${JSON.stringify(status.activeAnimation)}`,
+      );
+    }
+    const expectedLevel = activity === "speaking" ? 0.35 : 0;
+    if (
+      typeof status.audioLevel !== "number" ||
+      !Number.isFinite(status.audioLevel) ||
+      Math.abs(status.audioLevel - expectedLevel) > 1e-4
+    ) {
+      throw new Error(
+        `Pocket audioLevel must be ${expectedLevel}; ` +
+          `found ${JSON.stringify(status.audioLevel)}`,
+      );
+    }
   }
 }
 
@@ -608,7 +669,23 @@ export function validatePocketHealthBody(body: JsonObject): number {
   ) {
     throw new Error("Pocket health renderFps must be a finite number > 1");
   }
+  validatePocketFrameCount(body);
   return status.renderFps;
+}
+
+export function validatePocketFrameCount(body: JsonObject): number {
+  if (!isJsonObject(body.status)) {
+    throw new Error("Pocket health status must be an object");
+  }
+  const frameCount = body.status.renderFrameCount;
+  if (
+    typeof frameCount !== "number" ||
+    !Number.isSafeInteger(frameCount) ||
+    frameCount < 1
+  ) {
+    throw new Error("Pocket health renderFrameCount must be a positive integer");
+  }
+  return frameCount;
 }
 
 async function probeHealth(
@@ -1318,6 +1395,7 @@ async function benchmarkTarget(
     launched_at: new Date().toISOString(),
     ready_at: null,
     readiness_health: null,
+    settled_activity_health: null,
     reference_cdp: null,
     frame_receipt: null,
     settled_at: null,
@@ -1331,6 +1409,7 @@ async function benchmarkTarget(
   activeRun = { target: spec.target, child };
   let referenceCdp: CdpClient | null = null;
   let frameMeasurement: ActiveReferenceFrameMeasurement | null = null;
+  let previousPocketFrameCount: number | null = null;
 
   try {
     console.error(
@@ -1339,6 +1418,9 @@ async function benchmarkTarget(
     const readiness = await waitForReadyHealth(spec, child);
     run.ready_at = readiness.captured_at;
     run.readiness_health = readiness;
+    if (spec.target === "pocket") {
+      previousPocketFrameCount = validatePocketFrameCount(readiness.body);
+    }
     if (spec.target === "reference") {
       const prepared = await prepareReferenceCdp(spec, child);
       referenceCdp = prepared.client;
@@ -1348,8 +1430,9 @@ async function benchmarkTarget(
           `${prepared.receipt.canvas.canvas.backing.join("x")}`,
       );
     }
+    await driveBenchmarkActivity(spec, child, options.activity);
     console.error(
-      `bench-persona: ${spec.target} ready; settling ${options.settleSeconds}s`,
+      `bench-persona: ${spec.target} ${options.activity}; settling ${options.settleSeconds}s`,
     );
     await delayWhileRunning(
       child,
@@ -1357,6 +1440,17 @@ async function benchmarkTarget(
       `${spec.target} exited during settle`,
     );
     run.settled_at = new Date().toISOString();
+    run.settled_activity_health = await captureRequiredHealth(
+      spec,
+      child,
+      "settled activity",
+      options.activity,
+    );
+    if (spec.target === "pocket") {
+      previousPocketFrameCount = validatePocketFrameCount(
+        run.settled_activity_health.body,
+      );
+    }
 
     if (referenceCdp != null) {
       frameMeasurement = await startReferenceFrameMeasurement(
@@ -1387,7 +1481,21 @@ async function benchmarkTarget(
         spec,
         child,
         `sample ${index + 1}`,
+        options.activity,
       );
+      if (spec.target === "pocket") {
+        const frameCount = validatePocketFrameCount(health.body);
+        if (
+          previousPocketFrameCount != null &&
+          frameCount <= previousPocketFrameCount
+        ) {
+          throw new Error(
+            `pocket sample ${index + 1} renderFrameCount did not advance: ` +
+              `${previousPocketFrameCount} -> ${frameCount}`,
+          );
+        }
+        previousPocketFrameCount = frameCount;
+      }
       const sample = buildIntervalSample(
         index + 1,
         samplingStart,
@@ -1432,6 +1540,67 @@ async function benchmarkTarget(
     run.terminated_at = new Date().toISOString();
     if (activeRun?.child.pid === child.pid) activeRun = null;
   }
+}
+
+async function driveBenchmarkActivity(
+  spec: LaunchSpec,
+  child: SpawnedProcess,
+  activity: BenchmarkActivity,
+): Promise<void> {
+  await postBenchmarkEvent(spec, child, {
+    type: "state",
+    state: {
+      phase: activity === "speaking" ? "active" : "inactive",
+      activity,
+      microphoneMuted: false,
+      outputMuted: false,
+    },
+  });
+  await postBenchmarkEvent(spec, child, {
+    type: "audio-level",
+    level: activity === "speaking" ? 0.35 : 0,
+  });
+}
+
+async function postBenchmarkEvent(
+  spec: LaunchSpec,
+  child: SpawnedProcess,
+  body: unknown,
+): Promise<void> {
+  const url = `http://127.0.0.1:${spec.bridgePort}/events`;
+  let lastFailure = "event request did not run";
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    assertProcessAlive(child.pid, `${spec.target} exited before activity setup`);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(EVENT_REQUEST_TIMEOUT_MS),
+      });
+      const text = await response.text();
+      if (response.status === 202) {
+        const parsed = JSON.parse(text) as unknown;
+        if (isJsonObject(parsed) && parsed.accepted === true) return;
+        lastFailure = `event was not accepted: ${text}`;
+      } else {
+        lastFailure = `HTTP ${response.status}: ${text.slice(0, 200)}`;
+        if (response.status !== 502 && response.status !== 503) break;
+      }
+    } catch (error) {
+      lastFailure = errorMessage(error);
+    }
+    if (attempt < 5) {
+      await delayWhileRunning(
+        child,
+        75,
+        `${spec.target} exited during activity setup`,
+      );
+    }
+  }
+  throw new Error(
+    `${spec.target} activity event ${JSON.stringify(body)} failed: ${lastFailure}`,
+  );
 }
 
 async function captureProcessTree(rootPid: number): Promise<TimedTreeSnapshot> {
@@ -1943,6 +2112,7 @@ function parseArgs(argv: string[]): Options {
     "--bundle",
     "--max-fps",
     "--max-texture-dim",
+    "--activity",
     "--settle",
     "--samples",
     "--interval",
@@ -2009,6 +2179,11 @@ function parseArgs(argv: string[]): Options {
     throw new Error("--max-texture-dim must be an integer > 0");
   }
 
+  const activityRaw = values.get("--activity") ?? "idle";
+  if (activityRaw !== "idle" && activityRaw !== "speaking") {
+    throw new Error("--activity must be idle or speaking");
+  }
+
   const intervalSeconds = numberValue(
     "--interval",
     DEFAULT_INTERVAL_SECONDS,
@@ -2030,6 +2205,7 @@ function parseArgs(argv: string[]): Options {
     bundle: absolutePath(required("--bundle")),
     maxFps,
     maxTextureDim,
+    activity: activityRaw,
     settleSeconds: numberValue(
       "--settle",
       DEFAULT_SETTLE_SECONDS,
@@ -2174,13 +2350,14 @@ function usage(): string {
   return `usage: bun scripts/bench-persona.ts \\
   --reference-bin PATH --reference-root PATH \\
   --pocket-bin PATH --library PATH --bundle PATH \\
-  [--max-fps FPS] [--max-texture-dim PIXELS] \\
+  [--max-fps FPS] [--max-texture-dim PIXELS] [--activity idle|speaking] \\
   [--settle 15] [--samples 13] [--interval 5] [--out PATH]
 
 Runs the Electron reference first, terminates its full process tree, then runs
 the Pocket binary. Each target gets an isolated loopback bridge port and must
 return {ok:true} from /health within ${READINESS_TIMEOUT_SECONDS}s. Only then
-does it settle, capture a cumulative CPU-time baseline, and record resource plus
+does it drive the requested idle/speaking activity, settle, capture a
+cumulative CPU-time baseline, and record resource plus
 health samples after each --interval. Reference also requires a non-settings CDP
 page, validated 430x680 DPR 1.5 WebGL canvas, and a whole-window rAF receipt;
 Pocket health must report a configured, visible model and renderFps > 1. Use
