@@ -42,7 +42,7 @@ measurement section below for the answer.
 The generic halves live in the PocketJS main repo:
 `pocket3d` (morph targets, pose injection, widget windows) and `pocket-vrm`
 (VRM 0.x parsing, spring bones, VRMA retargeting) — see
-[pocket-stack/pocketjs#125](https://github.com/pocket-stack/pocketjs/pull/125).
+[pocket-nexus/pocketjs#125](https://github.com/pocket-nexus/pocketjs/pull/125).
 
 ## Manual verification, from scratch
 
@@ -51,7 +51,7 @@ Apple Silicon is the measured platform.
 
 ```sh
 # 1. Clone with the engine submodule
-git clone --recurse-submodules https://github.com/pocket-stack/pocket-character
+git clone --recurse-submodules https://github.com/pocket-nexus/pocket-character
 cd pocket-character
 
 # 2. One-time setup: vendored bun install, node_modules symlinks,
