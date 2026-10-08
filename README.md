@@ -11,6 +11,36 @@ cost on the Pocket architecture instead of Electron?* See
 [DESIGN.md](DESIGN.md) for the architecture and the parity contract, and the
 measurement section below for the answer.
 
+## Persona parity POC
+
+This repository also owns the Pocket-native vertical slice of
+[xikhar/persona](https://github.com/xikhar/persona). The two visual acceptance
+commands prepare a pinned reference checkout, validate and stage the same local
+VRM/VRMA inputs, build the selected target, launch it, and drive the same
+idle/speaking/lip-sync/action sequence:
+
+```sh
+bun run accept:persona
+bun run accept:pocket
+```
+
+Visual acceptance includes the whole pose, not only a running window: compare
+the shoulders, wrists/hands, hips, knees, and ankles/feet through idle and
+speaking, and reject any persistent rest-axis twist. Press Ctrl-C to terminate
+the complete target process tree. For the sequential resource comparison:
+
+```sh
+bun run bench:persona
+bun run bench:persona:speaking
+bun run bench:persona:controlled
+```
+
+The production commands compare stock Persona at its display-driven rate with
+Pocket at its intended 30 fps / 2048 texture cap, in idle or sustained-speaking
+state. See [docs/PERSONA.md](docs/PERSONA.md) for the latest upstream pin,
+parity boundary, benchmark methodology, measurements, and asset-license
+constraints.
+
 ## What it does
 
 - **AvatarSample_A** (VRoid official sample) with airi's `idle_loop.vrma`

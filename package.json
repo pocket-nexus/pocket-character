@@ -6,6 +6,11 @@
     "setup": "cd vendor/pocketjs && bun install && cd ../.. && mkdir -p node_modules/@pocketjs && ln -sfn ../../vendor/pocketjs node_modules/@pocketjs/framework && ln -sfn ../vendor/pocketjs/node_modules/solid-js node_modules/solid-js && ln -sfn ../vendor/pocketjs/node_modules/bun-types node_modules/bun-types && bun scripts/fetch-assets.ts",
     "typecheck": "bun vendor/pocketjs/node_modules/typescript/bin/tsc --noEmit",
     "build:ui": "bun scripts/build-ui.ts",
-    "widget": "bun scripts/widget.ts"
+    "widget": "bun scripts/widget.ts",
+    "accept:persona": "bun scripts/accept-persona.ts reference",
+    "accept:pocket": "bun scripts/accept-persona.ts pocket",
+    "bench:persona": "bun scripts/accept-persona.ts bench --profile production",
+    "bench:persona:speaking": "bun scripts/accept-persona.ts bench --profile production --activity speaking",
+    "bench:persona:controlled": "bun scripts/accept-persona.ts bench --profile controlled"
   }
 }

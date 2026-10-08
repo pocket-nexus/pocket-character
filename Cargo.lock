@@ -1611,13 +1611,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "pocket-persona"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "glam",
+ "log",
+ "pocket-mod",
+ "pocket-vrm",
+ "pocket-widget",
+ "pocket3d",
+ "serde",
+ "serde_json",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "pocket-ui-surface"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "pocket-mod",
+ "pocketjs-core",
+]
+
+[[package]]
 name = "pocket-ui-wgpu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
- "log",
- "pocket-mod",
+ "pocket-ui-surface",
  "pocket3d",
  "pocketjs-core",
  "wgpu",
@@ -1636,6 +1663,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pocket-widget"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "log",
+ "pocket-ui-wgpu",
+ "pocket3d",
+ "pocketjs-core",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "pocket3d"
 version = "0.1.0"
 dependencies = [
@@ -1648,6 +1689,7 @@ dependencies = [
  "png",
  "pocket3d-bsp",
  "pollster",
+ "serde_json",
  "wgpu",
  "winit",
 ]
